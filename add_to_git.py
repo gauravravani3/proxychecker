@@ -2,6 +2,31 @@ import os
 import subprocess
 import sys
 import shutil
+import urllib.parse
+
+def is_remote_git_url(path):
+    """
+    Checks if a given string looks like a remote git URL.
+    """
+    return path.startswith("http://") or path.startswith("https://") or path.startswith("git@")
+
+def get_repo_name_from_url(url):
+    """
+    Extracts the repository name from a git URL.
+    """
+    if url.endswith(".git"):
+        url = url[:-4]
+
+    if url.startswith("git@"):
+        # e.g. git@github.com:user/repo -> repo
+        return url.split("/")[-1]
+    else:
+        # e.g. https://github.com/user/repo -> repo
+        parsed = urllib.parse.urlparse(url)
+        path = parsed.path
+        if path.startswith("/"):
+            path = path[1:]
+        return path.split("/")[-1]
 
 def is_subpath(path, base_path):
     """
@@ -14,11 +39,45 @@ def is_subpath(path, base_path):
         # On Windows, ValueError is raised if paths are on different drives
         return False
 
-def add_folder_to_git(repo_path, folder_path, commit_message="Add new folder to repository"):
+def clone_repo(url, destination_folder=None):
+    """
+    Clones a git repository into the current directory or the specified folder.
+    Returns the path to the cloned repository.
+    """
+    repo_name = get_repo_name_from_url(url)
+    if not destination_folder:
+        destination_folder = repo_name
+
+    if os.path.exists(destination_folder):
+        print(f"Directory '{destination_folder}' already exists.")
+        if os.path.isdir(os.path.join(destination_folder, ".git")):
+            print(f"It seems to be a git repository already. We will use the existing folder.")
+            return destination_folder
+        else:
+            print(f"Error: '{destination_folder}' exists but is not a git repository. Cannot clone into it.")
+            return None
+
+    try:
+        print(f"Cloning '{url}' into '{destination_folder}'...")
+        subprocess.run(["git", "clone", url, destination_folder], check=True)
+        return destination_folder
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to clone repository: {e}")
+        return None
+
+def add_folder_to_git(repo_path_or_url, folder_path, commit_message="Add new folder to repository"):
     """
     Adds a folder to the git repository, commits, and pushes the changes.
     The folder will be copied into the repository if it is not already inside it.
     """
+    if is_remote_git_url(repo_path_or_url):
+        # It's a remote URL, we need to clone it first
+        repo_path = clone_repo(repo_path_or_url)
+        if not repo_path:
+            return # Cloning failed
+    else:
+        repo_path = repo_path_or_url
+
     if not os.path.exists(repo_path):
         print(f"Error: Repository path '{repo_path}' does not exist.")
         return
@@ -97,7 +156,7 @@ def add_folder_to_git(repo_path, folder_path, commit_message="Add new folder to 
 if __name__ == "__main__":
     try:
         # Ask for the repository path
-        print("Enter the path to your git repository (leave empty for current folder): ", end="")
+        print("Enter the path to your git repository or its remote URL (leave empty for current folder): ", end="")
         repo_path = input().strip()
         if not repo_path:
             repo_path = "."
